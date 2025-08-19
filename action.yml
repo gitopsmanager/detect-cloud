@@ -1,0 +1,76 @@
+# .github/actions/detect-cloud/action.yml
+# Copyright (c) 2025 Affinity7 Consulting Ltd
+# SPDX-License-Identifier: MIT
+#
+# This action is licensed under the MIT License.
+# See LICENSE for details.
+
+name: Detect cloud provider (self-hosted)
+description: Detects AWS vs Azure on self-hosted runners via IMDS, with safe fallbacks.
+author: Affinity7 Consulting Ltd
+branding:
+  icon: radio
+  color: blue
+
+inputs:
+  timeout-ms:
+    description: Curl timeout for metadata calls (milliseconds)
+    required: false
+    default: "1000"
+
+outputs:
+  provider:
+    description: aws | azure | unknown
+    value: ${{ steps.detect.outputs.provider }}
+  method:
+    description: detection method (imds:azure | imds:aws-token | env:*)
+    value: ${{ steps.detect.outputs.method }}
+
+runs:
+  using: composite
+  steps:
+    - id: detect
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        TO_MS=${{ inputs.timeout-ms }}
+        SECS=$(( (TO_MS + 999) / 1000 )); [ "$SECS" -lt 1 ] && SECS=1
+
+        provider="unknown"
+        method="none"
+
+        # Always bypass proxies for IMDS
+        export NO_PROXY="169.254.169.254,metadata,localhost,127.0.0.1"
+        export no_proxy="$NO_PROXY"
+
+        # 1) Azure IMDS first (fast on Azure, quick fail elsewhere)
+        if curl -fsS -m "$SECS" --noproxy '*' \
+             -H 'Metadata: true' \
+             'http://169.254.169.254/metadata/instance/compute?api-version=2021-02-01' \
+             >/dev/null 2>&1; then
+          provider="azure"; method="imds:azure"
+        fi
+
+        # 2) AWS IMDS: single token probe
+        if [ "$provider" = "unknown" ]; then
+          code="$(curl -sS -o /dev/null -w '%{http_code}' -m "$SECS" --noproxy '*' \
+            -X PUT 'http://169.254.169.254/latest/api/token' \
+            -H 'X-aws-ec2-metadata-token-ttl-seconds: 60' || true)"
+          if [ "$code" = "200" ]; then
+            provider="aws"; method="imds:aws-token"
+          fi
+        fi
+
+        # 3) Last-resort heuristics (only if IMDS unreachable/blocked)
+        if [ "$provider" = "unknown" ]; then
+          if [ -n "${AWS_REGION:-}${AWS_DEFAULT_REGION:-}" ]; then
+            provider="aws"; method="env:aws_region"
+          elif [ -n "${MSI_ENDPOINT:-}${IDENTITY_ENDPOINT:-}" ]; then
+            provider="azure"; method="env:msi_endpoint"
+          fi
+        fi
+
+        echo "provider=$provider" >> "$GITHUB_OUTPUT"
+        echo "method=$method"     >> "$GITHUB_OUTPUT"
+        echo "Detected provider: $provider ($method)"
