@@ -86,6 +86,8 @@ jobs:
         if: steps.cloud.outputs.provider == 'aws'
         run: echo "Do AWS things"
 
+```
+
 ## Timing & timeouts
 
 On Azure, the AWS probe typically fails immediately (non-200), so it won’t sit on the full timeout.
