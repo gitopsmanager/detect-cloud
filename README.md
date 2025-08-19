@@ -34,6 +34,8 @@ Returns one of: `azure`, `aws`, or `unknown`.
    - `MSI_ENDPOINT` / `IDENTITY_ENDPOINT` ⇒ `azure`
    - Otherwise ⇒ `unknown`
 
+ ⚠️ On **GitHub-hosted runners**, the IMDS endpoint is blocked and no cloud-specific envs are present, so detection always returns `unknown`.
+
 Each probe uses a configurable timeout (default **1000 ms**) and returns quickly when endpoints respond with non-matching status codes.
 
 ---
